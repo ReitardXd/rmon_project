@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static volatile sig_atomic_t stop_requested;
@@ -29,20 +30,25 @@ main(int argc, char **argv)
     int capture_started = 0;
     int timer_started = 0;
 
-    if (argc != 2 || argv[1][0] == '\0' || strchr(argv[1], '/') != NULL) {
-        fprintf(stderr, "usage: %s <ethernet-interface>\n", argv[0]);
+    if (argc < 2 || argc > 3 || argv[1][0] == '\0' || strchr(argv[1], '/') != NULL) {
+        fprintf(stderr, "usage: %s <ethernet-interface> [link-mbps]\n", argv[0]);
         return 2;
     }
     if (rmon_state_init(&state, argv[1]) != 0) {
         fprintf(stderr, "cannot initialize interface %s\n", argv[1]);
         return 2;
     }
+    if (argc == 3)
+        state.link_bps = strtoull(argv[2], NULL, 10) * 1000000ULL;
     (void)signal(SIGINT, handle_signal);
     (void)signal(SIGTERM, handle_signal);
+    (void)signal(SIGPIPE, SIG_IGN);
 
+    snmp_enable_stderrlog();
     netsnmp_enable_subagent();
     init_agent("rmon-probe");
     rmon_register_tables(&state);
+    rmon_bootstrap_rows();
     init_snmp("rmon-probe");
 
     if (pthread_create(&capture_thread, NULL, rmon_capture_thread, &state) == 0)

@@ -4,9 +4,11 @@
 
 #include <errno.h>
 #include <inttypes.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static uint64_t
 read_u64_file(const char *path, uint64_t fallback)
@@ -66,6 +68,13 @@ packet_callback(unsigned char *user, const struct pcap_pkthdr *header,
     rmon_counter_add_packet(state, packet, header->caplen, octets);
 }
 
+static void *
+capture_fail(void)
+{
+    (void)kill(getpid(), SIGTERM);
+    return NULL;
+}
+
 void *
 rmon_capture_thread(void *argument)
 {
@@ -76,23 +85,26 @@ rmon_capture_thread(void *argument)
     handle = pcap_create(state->ifname, error);
     if (handle == NULL) {
         fprintf(stderr, "pcap_create(%s): %s\n", state->ifname, error);
-        return NULL;
+        return capture_fail();
     }
-    if (pcap_set_snaplen(handle, 65535) != 0 || pcap_set_promisc(handle, 1) != 0 ||
-        pcap_set_timeout(handle, 250) != 0 || pcap_activate(handle) < 0) {
+    if (pcap_set_snaplen(handle, 64) != 0 || pcap_set_promisc(handle, 1) != 0 ||
+        pcap_set_timeout(handle, 250) != 0 ||
+        pcap_set_buffer_size(handle, 16 * 1024 * 1024) != 0 || pcap_activate(handle) < 0) {
         fprintf(stderr, "pcap activation on %s failed: %s\n", state->ifname, pcap_geterr(handle));
         pcap_close(handle);
-        return NULL;
+        return capture_fail();
     }
     if (pcap_datalink(handle) != DLT_EN10MB) {
         fprintf(stderr, "%s is not an Ethernet capture device (DLT %d)\n",
             state->ifname, pcap_datalink(handle));
         pcap_close(handle);
-        return NULL;
+        return capture_fail();
     }
-    if (pcap_setdirection(handle, PCAP_D_IN) != 0)
-        fprintf(stderr, "warning: cannot restrict %s capture to inbound packets: %s\n",
-            state->ifname, pcap_geterr(handle));
+    if (pcap_setdirection(handle, PCAP_D_IN) != 0) {
+        fprintf(stderr, "cannot restrict %s capture to inbound: %s\n", state->ifname, pcap_geterr(handle));
+        pcap_close(handle);
+        return capture_fail();
+    }
     read_interface_stats(state);
 
     for (;;) {

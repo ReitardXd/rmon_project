@@ -4,6 +4,7 @@
 #include <net-snmp/net-snmp-includes.h>
 #include <net-snmp/agent/net-snmp-agent-includes.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -47,16 +48,12 @@ static struct rmon_history_row *history_find_locked(long index)
 
 static struct rmon_stats_row *stats_copy_next(long after)
 {
-    struct rmon_stats_row *row, *best = NULL, *copy = NULL;
+    struct rmon_stats_row *row, *best = NULL;
     pthread_mutex_lock(&rmon->lock);
     for (row = rmon->stats_rows; row != NULL; row = row->next)
         if (row->index > after && (best == NULL || row->index < best->index)) best = row;
-    if (best != NULL && (copy = malloc(sizeof(*copy))) != NULL) {
-        *copy = *best;
-        copy->next = NULL;
-    }
     pthread_mutex_unlock(&rmon->lock);
-    return copy;
+    return best;
 }
 
 static netsnmp_variable_list *stats_iterate(void **loop, void **data,
@@ -85,7 +82,6 @@ static struct rmon_history_sample *history_copy_next(long after_index, long afte
 {
     struct rmon_history_row *row;
     struct rmon_history_sample *best = NULL;
-    struct rmon_history_sample *copy = NULL;
     size_t position;
     pthread_mutex_lock(&rmon->lock);
     for (row = rmon->history_rows; row != NULL; row = row->next) {
@@ -100,9 +96,8 @@ static struct rmon_history_sample *history_copy_next(long after_index, long afte
                 best = candidate;
         }
     }
-    if (best != NULL && (copy = malloc(sizeof(*copy))) != NULL) *copy = *best;
     pthread_mutex_unlock(&rmon->lock);
-    return copy;
+    return best;
 }
 
 static netsnmp_variable_list *history_iterate(void **loop, void **data,
@@ -131,17 +126,12 @@ static netsnmp_variable_list *history_next(void **l, void **d, netsnmp_variable_
 
 static struct rmon_history_row *control_copy_next(long after)
 {
-    struct rmon_history_row *row, *best = NULL, *copy = NULL;
+    struct rmon_history_row *row, *best = NULL;
     pthread_mutex_lock(&rmon->lock);
     for (row = rmon->history_rows; row != NULL; row = row->next)
         if (row->index > after && (best == NULL || row->index < best->index)) best = row;
-    if (best != NULL && (copy = malloc(sizeof(*copy))) != NULL) {
-        *copy = *best;
-        copy->samples = NULL;
-        copy->next = NULL;
-    }
     pthread_mutex_unlock(&rmon->lock);
-    return copy;
+    return best;
 }
 static netsnmp_variable_list *control_iterate(void **loop, void **data,
     netsnmp_variable_list *indexes, bool first)
@@ -229,23 +219,27 @@ static void history_get(netsnmp_agent_request_info *reqinfo, netsnmp_request_inf
     for (request = requests; request != NULL; request = request->next) {
         struct rmon_history_sample *row = netsnmp_extract_iterator_context(request);
         netsnmp_table_request_info *info = netsnmp_extract_table_info(request);
+        struct rmon_history_sample sample;
         if (row == NULL) { netsnmp_set_request_error(reqinfo, request, SNMP_NOSUCHINSTANCE); continue; }
+        pthread_mutex_lock(&rmon->lock);
+        sample = *row;
+        pthread_mutex_unlock(&rmon->lock);
         switch (info->colnum) {
-        case EH_INDEX: set_integer(request->requestvb, row->control_index); break;
-        case EH_SAMPLE: set_integer(request->requestvb, row->sample_index); break;
-        case EH_START: set_ticks(request->requestvb, row->interval_start); break;
-        case EH_DROPS: set_counter(request->requestvb, row->counters.drop_events); break;
-        case EH_OCTETS: set_counter(request->requestvb, row->counters.octets); break;
-        case EH_PKTS: set_counter(request->requestvb, row->counters.pkts); break;
-        case EH_BROADCAST: set_counter(request->requestvb, row->counters.broadcast_pkts); break;
-        case EH_MULTICAST: set_counter(request->requestvb, row->counters.multicast_pkts); break;
-        case EH_CRC: set_counter(request->requestvb, row->counters.crc_align_errors); break;
-        case EH_UNDERSIZE: set_counter(request->requestvb, row->counters.undersize_pkts); break;
-        case EH_OVERSIZE: set_counter(request->requestvb, row->counters.oversize_pkts); break;
-        case EH_FRAGMENTS: set_counter(request->requestvb, row->counters.fragments); break;
-        case EH_JABBERS: set_counter(request->requestvb, row->counters.jabbers); break;
-        case EH_COLLISIONS: set_counter(request->requestvb, row->counters.collisions); break;
-        case EH_UTILIZATION: set_integer(request->requestvb, row->utilization); break;
+        case EH_INDEX: set_integer(request->requestvb, sample.control_index); break;
+        case EH_SAMPLE: set_integer(request->requestvb, sample.sample_index); break;
+        case EH_START: set_ticks(request->requestvb, sample.interval_start); break;
+        case EH_DROPS: set_counter(request->requestvb, sample.counters.drop_events); break;
+        case EH_OCTETS: set_counter(request->requestvb, sample.counters.octets); break;
+        case EH_PKTS: set_counter(request->requestvb, sample.counters.pkts); break;
+        case EH_BROADCAST: set_counter(request->requestvb, sample.counters.broadcast_pkts); break;
+        case EH_MULTICAST: set_counter(request->requestvb, sample.counters.multicast_pkts); break;
+        case EH_CRC: set_counter(request->requestvb, sample.counters.crc_align_errors); break;
+        case EH_UNDERSIZE: set_counter(request->requestvb, sample.counters.undersize_pkts); break;
+        case EH_OVERSIZE: set_counter(request->requestvb, sample.counters.oversize_pkts); break;
+        case EH_FRAGMENTS: set_counter(request->requestvb, sample.counters.fragments); break;
+        case EH_JABBERS: set_counter(request->requestvb, sample.counters.jabbers); break;
+        case EH_COLLISIONS: set_counter(request->requestvb, sample.counters.collisions); break;
+        case EH_UTILIZATION: set_integer(request->requestvb, sample.utilization); break;
         default: netsnmp_set_request_error(reqinfo, request, SNMP_NOSUCHOBJECT); break;
         }
     }
@@ -461,11 +455,13 @@ static void register_iterator(const char *name, const oid *base, size_t base_len
     table = SNMP_MALLOC_TYPEDEF(netsnmp_table_registration_info);
     iterator = SNMP_MALLOC_TYPEDEF(netsnmp_iterator_info);
     if (registration == NULL || table == NULL || iterator == NULL) return;
-    netsnmp_table_helper_add_indexes(table, ASN_INTEGER, indexes == 2 ? ASN_INTEGER : 0);
+    if (indexes == 2)
+        netsnmp_table_helper_add_indexes(table, ASN_INTEGER, ASN_INTEGER, 0);
+    else
+        netsnmp_table_helper_add_indexes(table, ASN_INTEGER, 0);
     table->min_column = 1; table->max_column = max_column;
     iterator->get_first_data_point = first; iterator->get_next_data_point = next;
     iterator->free_loop_context_at_end = free_iterator_context;
-    iterator->free_data_context = free_iterator_context;
     iterator->table_reginfo = table;
     netsnmp_register_table_iterator2(registration, iterator);
 }
@@ -479,4 +475,42 @@ void rmon_register_tables(struct rmon_state *state)
     register_iterator("etherStatsTable", stats_oid, OID_LENGTH(stats_oid), stats_handler, 1, 1, STATS_STATUS, stats_first, stats_next);
     register_iterator("historyControlTable", control_oid, OID_LENGTH(control_oid), control_handler, 1, 1, HC_STATUS, control_first, control_next);
     register_iterator("etherHistoryTable", history_oid, OID_LENGTH(history_oid), history_handler, 0, 2, EH_UTILIZATION, history_first, history_next);
+}
+
+static void set_source(oid *dst, size_t *len, unsigned int ifindex)
+{
+    static const oid base[] = {1,3,6,1,2,1,2,2,1,1};
+    memcpy(dst, base, sizeof(base));
+    dst[OID_LENGTH(base)] = ifindex;
+    *len = OID_LENGTH(base) + 1;
+}
+
+void rmon_bootstrap_rows(void)
+{
+    static const long hb[][2] = {{120, 30}, {50, 1800}};
+    struct rmon_stats_row *s;
+    struct rmon_history_row *h;
+    struct timespec now;
+    size_t i;
+    pthread_mutex_lock(&rmon->lock);
+    if ((s = create_stats_locked(1)) != NULL) {
+        set_source(s->data_source, &s->data_source_len, rmon->ifindex);
+        (void)snprintf(s->owner, sizeof(s->owner), "bootstrap");
+        s->baseline = rmon->counters;
+        s->status = RMON_STATUS_VALID;
+    }
+    for (i = 0; i < 2; i++) {
+        if ((h = create_history_locked((long)i + 1)) == NULL) continue;
+        set_source(h->data_source, &h->data_source_len, rmon->ifindex);
+        (void)resize_history_locked(h, hb[i][0]);
+        h->interval_seconds = hb[i][1];
+        (void)snprintf(h->owner, sizeof(h->owner), "bootstrap");
+        h->interval_baseline = rmon->counters;
+        h->interval_start = rmon_uptime_ticks(rmon);
+        (void)clock_gettime(CLOCK_MONOTONIC, &now);
+        now.tv_sec += h->interval_seconds;
+        h->next_deadline = now;
+        h->status = RMON_STATUS_VALID;
+    }
+    pthread_mutex_unlock(&rmon->lock);
 }

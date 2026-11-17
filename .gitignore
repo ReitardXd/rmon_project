@@ -1,2 +1,26 @@
+# Build output
 /build/
 /rmon-probe
+*.o
+*.d
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.streamlit/
+
+# Local logs and scratch notes
+*.log
+/run.txt
+
+# Generated validation runs; keep the latest published summary
+/docs/results/*
+!/docs/results/LATEST.md
+
+# Editors and OS files
+.vscode/
+.idea/
+.DS_Store

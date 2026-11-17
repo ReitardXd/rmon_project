@@ -242,7 +242,7 @@ rmon_history_timer(void *argument)
                 timespec_compare(&now, &row->next_deadline) < 0)
                 continue;
             history_append_locked(state, row);
-            row->next_deadline = timespec_add_seconds(now, row->interval_seconds);
+            row->next_deadline = timespec_add_seconds(row->next_deadline, row->interval_seconds);
         }
         pthread_mutex_unlock(&state->lock);
     }
