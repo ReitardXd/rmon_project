@@ -387,7 +387,7 @@ live implementation is in `src/`.
 
 ## License
 
-Copyright (C) 2026 rmon-probe contributors.
+Copyright (C) 2026 ReitardXd.
 
 This project is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
